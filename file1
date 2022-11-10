@@ -1,0 +1,356 @@
+/*
+ * Copyright (C) 2021 SailPoint Technologies, Inc.  All rights reserved.
+ */
+import { CommonModule, DatePipe } from '@angular/common';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { CUSTOM_ELEMENTS_SCHEMA, Component, NgModule } from '@angular/core';
+import {
+	ComponentFixture,
+	TestBed,
+	discardPeriodicTasks,
+	fakeAsync,
+	flush,
+	getTestBed,
+	tick
+} from '@angular/core/testing';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { By } from '@angular/platform-browser';
+import { NoopAnimationsModule } from '@angular/platform-browser/animations';
+import { Router, RunGuardsAndResolvers } from '@angular/router';
+import { RouterTestingModule } from '@angular/router/testing';
+
+import { EffectsModule } from '@ngrx/effects';
+import { StoreModule } from '@ngrx/store';
+import { TranslateLoader } from '@ngx-translate/core';
+
+import { LoadingMaskModule } from '@sailpoint-priv/armada-angular/src/sailpoint/angular/components/loading-mask';
+import { TabComponent, TabListComponent } from '@sailpoint-priv/armada-angular/src/sailpoint/angular/components/tabs';
+import { TooltipModule } from '@sailpoint-priv/armada-angular/src/sailpoint/angular/components/tooltip';
+import { TranslateStaticLoader } from '@sailpoint-priv/armada-angular/src/sailpoint/angular/l10n/translate-static-loader';
+import {
+	TranslateModule,
+	TranslateService
+} from '@sailpoint-priv/armada-angular/src/sailpoint/angular/l10n/translation';
+import { TruncatedTextToolTipModule } from '@sailpoint-priv/armada-angular/src/sailpoint/angular/util/truncated-text-tooltip';
+
+import { ApiListResponse } from '@sailpoint-priv/ui-common/src/sailpoint/angular/api/api-service';
+import { IdnNavbarModule } from '@sailpoint-priv/ui-common/src/sailpoint/angular/navigation/navbar';
+import {
+	MockNavbarConfigService,
+	NavbarConfigService
+} from '@sailpoint-priv/ui-common/src/sailpoint/angular/navigation/navbar-config';
+import { RoutingService } from '@sailpoint-priv/ui-common/src/sailpoint/angular/navigation/routing';
+import { FeatureFlagService } from '@sailpoint-priv/ui-common/src/sailpoint/angular/util/feature-flag';
+import { GlobalService, MockGlobalService } from '@sailpoint-priv/ui-common/src/sailpoint/angular/util/global';
+import { ProductFlagService } from '@sailpoint-priv/ui-common/src/sailpoint/angular/util/product-flag';
+
+import { entitlementsApiActions, entitlementsPageActions } from './entitlements/store/actions';
+import { RequestCenterEffects } from './store/effects';
+import { RequestCenterReducer } from './store/reducers';
+
+import { FeatureFlagGuard } from '../shared/feature-flag-guard';
+import { IdentityApiService } from '../shared/identity-api/identity-api.service';
+import { LoadingSpinnerComponent } from '../shared/loading-spinner/loading-spinner.component';
+import { RoboUtilityService } from '../shared/services/robo-util/robo-util.service';
+import { TabBarService } from '../shared/services/tab-bar/tab-bar.service';
+import { UserAccessService } from '../shared/user-access';
+import { ApplicationsComponent } from './applications/applications.component';
+import { EntitlementRequestCardComponent } from './entitlements/entitlement-request-card/entitlement-request-card.component';
+import { EntitlementsComponent } from './entitlements/entitlements.component';
+import { Entitlement } from './entitlements/models/entitlements.model';
+import { RequestCenterPageComponent } from './request-center-page.component';
+import { getMockAccessRequestConfig, getMockEntitlementsItem, mockUserState } from './request-center-page.mock';
+import { RequestCenterPageResolver } from './resolvers/request-center-page.resolver';
+import { AccessRequestConfigApiService } from './services/access-request-config-api/access-request-config-api.service';
+import { AppApiService } from './services/app-api/app-api.service';
+import { AppUtilService } from './services/app-util/app-util.service';
+import { EntitlementApiService } from './services/entitlement-api/entitlement-api.service';
+import { MyRequestApiService } from './services/my-request-api/my-request-api.service';
+import { RecommendationsApiService } from './services/recommendations-api/recommendations-api.service';
+import { LegacyRequestTrackerUtilityService } from './services/request-tracker-util/legacy-request-tracker-util.service';
+import { RoleApiService } from './services/role-api/role-api.service';
+import { REQUEST_CENTER_FEATURE_KEY } from './store/states';
+import { TabBarSearchComponent } from './tab-bar/tab-bar-search/tab-bar-search.component';
+import { RequestsTabBarComponent } from './tab-bar/tab-bar.component';
+import { screen } from '@testing-library/dom';
+
+class MockFlagService {
+	isEnabled() {
+		return true;
+	}
+}
+
+@Component({
+	selector: 'app-root-cmp',
+	template: ` <router-outlet></router-outlet>`
+})
+class RootComponent {}
+
+@NgModule({
+	imports: [
+		RouterTestingModule.withRoutes([
+			{
+				path: 'request-center',
+				component: RequestCenterPageComponent,
+				resolve: {
+					redirectTo: RequestCenterPageResolver
+				},
+				runGuardsAndResolvers: 'always' as RunGuardsAndResolvers,
+				children: [
+					{
+						path: '',
+						redirectTo: 'apps',
+						pathMatch: 'full'
+					},
+					{
+						path: 'apps',
+						component: ApplicationsComponent
+					},
+					{
+						path: 'entitlements',
+						component: EntitlementsComponent
+					}
+				]
+			}
+		]),
+		LoadingMaskModule,
+		CommonModule,
+		EffectsModule.forRoot(RequestCenterEffects),
+		StoreModule.forRoot({
+			[REQUEST_CENTER_FEATURE_KEY]: RequestCenterReducer
+		}),
+		HttpClientTestingModule,
+		TooltipModule,
+		TruncatedTextToolTipModule,
+		NoopAnimationsModule,
+		IdnNavbarModule,
+		ReactiveFormsModule,
+		TranslateModule.forRoot({
+			loader: {
+				provide: TranslateLoader,
+				useClass: TranslateStaticLoader
+			}
+		})
+	],
+	providers: [
+		RoutingService,
+		TabBarService,
+		DatePipe,
+		AccessRequestConfigApiService,
+		AppUtilService,
+		AppApiService,
+		MyRequestApiService,
+		LegacyRequestTrackerUtilityService,
+		RecommendationsApiService,
+		UserAccessService,
+		RoboUtilityService,
+		IdentityApiService,
+		RoleApiService,
+		EntitlementApiService,
+		EntitlementsComponent,
+		TabBarSearchComponent,
+		FormBuilder,
+		FeatureFlagGuard,
+		RequestCenterPageResolver,
+		{ provide: NavbarConfigService, useClass: MockNavbarConfigService },
+		{ provide: GlobalService, useValue: new MockGlobalService(mockUserState) },
+		{ provide: FeatureFlagService, useClass: MockFlagService },
+		{ provide: ProductFlagService, useValue: { isEnabled: () => true } },
+		TranslateService
+	],
+	declarations: [
+		RootComponent,
+		RequestCenterPageComponent,
+		RequestsTabBarComponent,
+		EntitlementsComponent,
+		LoadingSpinnerComponent,
+		TabBarSearchComponent,
+		EntitlementRequestCardComponent,
+		ApplicationsComponent,
+		TabComponent,
+		TabListComponent
+	],
+	entryComponents: [RootComponent, EntitlementsComponent, RequestCenterPageComponent],
+	schemas: [CUSTOM_ELEMENTS_SCHEMA]
+})
+class TestModule {}
+
+describe('RequestCenterPageComponent integration test', () => {
+	let component: RootComponent;
+	let fixture: ComponentFixture<RootComponent>;
+	let httpMock: HttpTestingController;
+	let testRouter: Router;
+	let translate: TranslateService;
+	let featureFlagService: FeatureFlagService;
+	const mockCount = 4;
+	const mockSearchCount = 1;
+	const mockEntitlementIdClicked = getMockEntitlementsItem()[2].id;
+
+	function httpMockAccessRequestConfig(roboEnabled) {
+		httpMock
+			.expectOne(req => {
+				return req.url === 'BETA://access-request-config/';
+			})
+			.flush(getMockAccessRequestConfig(roboEnabled));
+	}
+
+	function httpMockEarsEntitlementsAPI() {
+		httpMock
+			.expectOne(req => {
+				return req.url === 'V0://ears/entitlements-v3/entitlements';
+			})
+			.flush(getMockEntitlementsItem(), { headers: { 'x-total-count': mockCount.toString(10) } });
+	}
+
+	function httpMockBetaEntitlementsAPI() {
+		httpMock
+			.expectOne(req => {
+				return req.url === 'V0://beta/entitlements';
+			})
+			.flush(getMockEntitlementsItem(), { headers: { 'x-total-count': mockCount.toString(10) } });
+	}
+
+	async function openOverlay() {
+		const requestButton: HTMLElement = screen.getByTestId('btn-entitlement-id_' + mockEntitlementIdClicked);
+		expect(requestButton).toBeTruthy();
+
+		requestButton.click();
+		tick();
+		fixture.detectChanges();
+	}
+
+	async function initialLoad(router, roboEnabled = true) {
+		router.initialNavigation();
+		router.navigateByUrl('/request-center');
+		tick();
+		httpMockAccessRequestConfig(roboEnabled);
+		fixture.detectChanges();
+	}
+
+	async function navigationToEntitlementsRoute(router, roboEnabled = true) {
+		httpMockBetaEntitlementsAPI();
+		const slptTabComponentElement: HTMLElement = await screen.getByTestId('app-request-center-entitlements-tab');
+		const slptTabElement: HTMLButtonElement = slptTabComponentElement.querySelector('button');
+		slptTabElement.click();
+		tick();
+		fixture.detectChanges();
+		router.navigateByUrl('/request-center/entitlements');
+		tick();
+		httpMockAccessRequestConfig(roboEnabled);
+		fixture.detectChanges();
+	}
+
+	beforeEach(() => {
+		TestBed.configureTestingModule({
+			imports: [TestModule]
+		}).compileComponents();
+
+		translate = getTestBed().get(TranslateService);
+		translate.use('en');
+		httpMock = TestBed.inject(HttpTestingController);
+		fixture = TestBed.createComponent(RootComponent);
+		component = fixture.componentInstance;
+		testRouter = TestBed.inject(Router);
+	});
+
+	it('should create', () => {
+		expect(component).toBeTruthy();
+	});
+
+	describe('Tab entitlements', () => {
+		it('should match the API count results in entitlement tab', fakeAsync(async () => {
+			const tabEntitlementsText = `${mockCount} Results`;
+			translate.setTranslation('en', { 'DASHBOARD.ACCESS_REQUEST.RESULTS': tabEntitlementsText });
+
+			await initialLoad(testRouter);
+			httpMockBetaEntitlementsAPI();
+			fixture.detectChanges();
+			const slptTabComponentElement: HTMLElement = screen.getByTestId('app-request-center-entitlements-tab');
+			const slptTabSpanElement = slptTabComponentElement.querySelector('span');
+			// count in tab entitlements equals to x-total-count from header
+			expect(slptTabSpanElement.innerHTML).toEqual(`(${tabEntitlementsText})`);
+
+			flush();
+			discardPeriodicTasks();
+		}));
+
+		it('should match the API count results in entitlement tab', fakeAsync(async () => {
+			jest.spyOn(featureFlagService, 'isEnabled').mockReturnValue(false);
+
+			const tabEntitlementsText = `${mockCount} Results`;
+			translate.setTranslation('en', { 'DASHBOARD.ACCESS_REQUEST.RESULTS': tabEntitlementsText });
+
+			await initialLoad(testRouter);
+			httpMockEarsEntitlementsAPI();
+			fixture.detectChanges();
+			const slptTabComponentElement: HTMLElement = screen.getByTestId('app-request-center-entitlements-tab');
+			const slptTabSpanElement = slptTabComponentElement.querySelector('span');
+			// count in tab entitlements equals to x-total-count from header
+			expect(slptTabSpanElement.innerHTML).toEqual(`(${tabEntitlementsText})`);
+
+			flush();
+			discardPeriodicTasks();
+		}));
+
+		it('should update counts on entitlements tab accordingly after searching by entitlement name', fakeAsync(async () => {
+			const entitlementsListResponseMock: ApiListResponse<Entitlement> = {
+				items: [getMockEntitlementsItem()[0]],
+				count: mockSearchCount,
+				limit: 50,
+				offset: 0
+			};
+			const searchText = 'Entitlement One';
+			const tabEntitlementsTextAfterSearch = `${mockSearchCount} Results`;
+			translate.setTranslation('en', { 'DASHBOARD.ACCESS_REQUEST.RESULTS': tabEntitlementsTextAfterSearch });
+
+			await initialLoad(testRouter);
+			httpMockBetaEntitlementsAPI();
+			fixture.detectChanges();
+
+			expect(entitlementsPageActions.searchEntitlementsEvent({ searchTerm: searchText })).toBeTruthy();
+			expect(
+				entitlementsApiActions.loadEntitlementsSuccess({
+					entitlementsListResponse: entitlementsListResponseMock
+				})
+			).toBeTruthy();
+
+			const slptTabComponentElement: HTMLElement = screen.getByTestId('app-request-center-entitlements-tab');
+			const slptTabSpanElement = slptTabComponentElement.querySelector('span');
+			// count in tab entitlements equals to x-total-count from header after request with search params
+			expect(slptTabSpanElement.innerHTML).toEqual(`(${tabEntitlementsTextAfterSearch})`);
+
+			flush();
+			discardPeriodicTasks();
+		}));
+	});
+
+	describe('ROBO permissions', () => {
+		it('should show radio buttons if ROBO enabled', fakeAsync(async () => {
+			await initialLoad(testRouter);
+			await navigationToEntitlementsRoute(testRouter, true);
+			await openOverlay();
+
+			const radioBtn = fixture.debugElement.query(
+				By.css('#entitlement-request-requesting-for-radio_' + mockEntitlementIdClicked)
+			);
+			expect(radioBtn).toBeTruthy();
+
+			flush();
+			discardPeriodicTasks();
+		}));
+
+		it('should NOT show radio buttons if ROBO disabled', fakeAsync(async () => {
+			await initialLoad(testRouter);
+			await navigationToEntitlementsRoute(testRouter, false);
+			await openOverlay();
+
+			const radioBtn = fixture.debugElement.query(
+				By.css('#entitlement-request-requesting-for-radio_' + mockEntitlementIdClicked)
+			);
+			expect(radioBtn).toBeNull();
+
+			flush();
+			discardPeriodicTasks();
+		}));
+	});
+});
